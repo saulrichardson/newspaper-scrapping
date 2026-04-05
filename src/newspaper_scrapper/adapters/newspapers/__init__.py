@@ -1,0 +1,1 @@
+"""Newspapers.com-specific adapters."""

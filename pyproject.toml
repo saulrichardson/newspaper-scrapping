@@ -1,0 +1,35 @@
+[project]
+name = "newspaper-scrapper"
+version = "0.1.0"
+description = "Robust headful Google Chrome scraper pipeline for Newspapers.com"
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+authors = [{ name = "saulrichardson" }]
+keywords = ["scraping", "newspapers.com", "chrome", "cdp"]
+dependencies = [
+  "click>=8.1,<9.0",
+  "pillow>=10.0,<12.0",
+  "pydantic>=2.6,<3.0",
+  "pydantic-settings>=2.0,<3.0",
+  "websockets>=12,<16",
+]
+
+[project.scripts]
+newspaper-scrapper = "newspaper_scrapper.cli.main:main"
+
+[[tool.poetry.packages]]
+include = "newspaper_scrapper"
+from = "src"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+ruff = "*"
+black = "*"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["data", "output", "scratch", ".venv"]
+
+[build-system]
+requires = ["poetry-core>=1.6.0"]
+build-backend = "poetry.core.masonry.api"

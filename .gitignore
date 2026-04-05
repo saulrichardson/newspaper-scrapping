@@ -1,0 +1,17 @@
+.env
+.env.local
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+.coverage
+htmlcov/
+data/
+output/
+scratch/
+dist/
+build/
+*.pyc
+docs/private/
+*.local.md
