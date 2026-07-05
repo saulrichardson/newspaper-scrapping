@@ -31,24 +31,38 @@ def _run_aws_json(command: list[str]) -> Any:
 
 def list_child_prefixes(bucket: str, prefix: str) -> list[str]:
     normalized = _normalize_prefix(prefix) + "/"
-    payload = _run_aws_json(
-        [
-            "aws",
-            "s3api",
-            "list-objects-v2",
-            "--bucket",
-            bucket,
-            "--prefix",
-            normalized,
-            "--delimiter",
-            "/",
-        ]
-    )
-    return [
-        str(item.get("Prefix", "") or "")
-        for item in (payload.get("CommonPrefixes") or [])
-        if str(item.get("Prefix", "") or "")
+    command_base = [
+        "aws",
+        "s3api",
+        "list-objects-v2",
+        "--bucket",
+        bucket,
+        "--prefix",
+        normalized,
+        "--delimiter",
+        "/",
     ]
+    prefixes: list[str] = []
+    continuation_token: str | None = None
+    while True:
+        command = list(command_base)
+        if continuation_token:
+            command.extend(["--continuation-token", continuation_token])
+        payload = _run_aws_json(command)
+        prefixes.extend(
+            str(item.get("Prefix", "") or "")
+            for item in (payload.get("CommonPrefixes") or [])
+            if str(item.get("Prefix", "") or "")
+        )
+
+        if not payload.get("IsTruncated"):
+            return prefixes
+        next_token = str(payload.get("NextContinuationToken", "") or "")
+        if not next_token:
+            raise RuntimeError(
+                f"aws s3api list-objects-v2 returned a truncated response without NextContinuationToken for s3://{bucket}/{normalized}"
+            )
+        continuation_token = next_token
 
 
 def fetch_s3_json(bucket: str, key: str) -> dict[str, Any] | None:

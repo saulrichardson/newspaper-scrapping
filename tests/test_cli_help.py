@@ -13,5 +13,6 @@ def test_cli_help() -> None:
     assert "screenshot-pages" in result.output
     assert "screenshot-pages-production" in result.output
     assert "download-pages" in result.output
+    assert "build-source-artifact-manifest" in result.output
     assert "shard-manifest" in result.output
     assert "torch-check" in result.output

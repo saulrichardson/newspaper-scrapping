@@ -31,6 +31,8 @@ def sync_s3_metadata(bucket: str, prefix: str, output_dir: Path) -> Path:
         "aws",
         "s3",
         "sync",
+        "--only-show-errors",
+        "--no-progress",
         f"s3://{bucket}/{prefix}",
         str(local_root),
         "--exact-timestamps",

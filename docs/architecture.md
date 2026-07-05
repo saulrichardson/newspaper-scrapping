@@ -37,7 +37,7 @@ This repo follows the same high-level ports/adapters split as the older
     extraction
 - `src/newspaper_scrapper/application/`
   - use-case orchestration for auth, discovery, cataloging, sharding, torch
-    checks, and downloads
+    checks, downloads, and parser-ready source artifact manifests
 - `src/newspaper_scrapper/cli/`
   - Click CLI surface
 
@@ -54,6 +54,30 @@ This repo follows the same high-level ports/adapters split as the older
   - one output dir per shard
   - one summary/results file per worker
   - resume workers independently
+
+## Cross-repo manifest contract
+
+Acquisition exports parser inputs with:
+
+```bash
+newspaper-scrapper build-source-artifact-manifest \
+  --input-csv output/<run>/results.csv \
+  --output-jsonl output/<run>/source_artifacts.jsonl \
+  --include-status downloaded \
+  --require-files
+```
+
+Each JSONL row is intentionally compatible with the parsing repo's parse input
+manifest: `page_id`, `image_path`, `issue_id`, `page_number`,
+`checksum_sha256`, `source`, and `metadata`. The acquisition repo owns source
+identity and checksums; the parser repo owns model outputs, fusion, transcripts,
+review packets, and performance reports.
+
+Torch smoke for this contract:
+
+```bash
+bash scripts/torch/submit_source_manifest_smoke.sh
+```
 
 ## Torch / HPC
 

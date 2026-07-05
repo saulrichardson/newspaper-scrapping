@@ -16,6 +16,7 @@ from newspaper_scrapper.application import screenshot_workers as screenshot_work
 from newspaper_scrapper.application import search as search_uc
 from newspaper_scrapper.application import search_workers as search_workers_uc
 from newspaper_scrapper.application import sharding as sharding_uc
+from newspaper_scrapper.application import source_manifest as source_manifest_uc
 from newspaper_scrapper.application import torch as torch_uc
 from newspaper_scrapper.application.auth import launch_browser
 from newspaper_scrapper.adapters.chrome import cdp
@@ -970,6 +971,54 @@ def shard_manifest_cmd(
         strategy=strategy,
     )
     click.echo(json.dumps(result, indent=2))
+
+
+@cli.command("build-source-artifact-manifest")
+@click.option("--input-csv", type=click.Path(path_type=Path, exists=True), required=True)
+@click.option("--output-jsonl", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--image-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Optional base directory used when image paths are relative or absent.",
+)
+@click.option(
+    "--image-path-field",
+    default="output_path",
+    show_default=True,
+    help="CSV column containing the acquired image path.",
+)
+@click.option("--source-system", default="newspapers.com", show_default=True)
+@click.option(
+    "--include-status",
+    multiple=True,
+    help="Only include rows with this status. Repeatable. If omitted, include all rows.",
+)
+@click.option(
+    "--require-files/--allow-missing-files",
+    default=False,
+    show_default=True,
+    help="Require every emitted image path to exist and include checksums.",
+)
+def build_source_artifact_manifest_cmd(
+    input_csv: Path,
+    output_jsonl: Path,
+    image_root: Path | None,
+    image_path_field: str,
+    source_system: str,
+    include_status: tuple[str, ...],
+    require_files: bool,
+) -> None:
+    result = source_manifest_uc.write_source_artifact_manifest(
+        input_csv=input_csv,
+        output_jsonl=output_jsonl,
+        image_root=image_root,
+        image_path_field=image_path_field,
+        source_system=source_system,
+        include_statuses={status for status in include_status if status},
+        require_files=require_files,
+    )
+    click.echo(json.dumps(result, indent=2, sort_keys=True))
 
 
 @cli.command("torch-check")

@@ -222,7 +222,21 @@ without exposing the private operational history of this repo.
      --sleep-between-pages 60
    ```
 
-13. Merge completed worker seed outputs into deduped page and issue manifests:
+13. Emit a parser-ready source artifact manifest from completed acquisitions:
+
+   ```bash
+   poetry run newspaper-scrapper build-source-artifact-manifest \
+     --input-csv output/search_zoning_downloads/results.csv \
+     --output-jsonl output/search_zoning_downloads/source_artifacts.jsonl \
+     --include-status downloaded \
+     --require-files
+   ```
+
+   The JSONL rows are the acquisition-side contract consumed by
+   `newspaper-parsing`: stable page IDs, acquired image paths, source URLs,
+   checksums, and provenance.
+
+14. Merge completed worker seed outputs into deduped page and issue manifests:
 
    ```bash
    poetry run newspaper-scrapper merge-search-workers \
@@ -235,7 +249,7 @@ without exposing the private operational history of this repo.
    - `page_manifest_merged.csv`
    - `issue_manifest_merged.csv`
 
-14. Split a large manifest into conservative worker shards:
+15. Split a large manifest into conservative worker shards:
 
    ```bash
    poetry run newspaper-scrapper shard-manifest \
@@ -248,7 +262,7 @@ without exposing the private operational history of this repo.
    This keeps each issue together by default, which is safer for low-rate
    multi-session downloading.
 
-15. Capture a browser-rendered full-page PNG as a first-class artifact when
+16. Capture a browser-rendered full-page PNG as a first-class artifact when
    the live `/image/<id>/` page is viewable and you want a browser-native
    page image:
 
