@@ -230,11 +230,19 @@ without exposing the private operational history of this repo.
      --output-jsonl output/search_zoning_downloads/source_artifacts.jsonl \
      --include-status downloaded \
      --require-files
+
+   poetry run newspaper-scrapper validate-source-artifact-manifest \
+     --input-jsonl output/search_zoning_downloads/source_artifacts.jsonl \
+     --require-files \
+     --require-checksums \
+     --verify-checksums \
+     --output-json output/search_zoning_downloads/source_artifacts.validation.json
    ```
 
    The JSONL rows are the acquisition-side contract consumed by
    `newspaper-parsing`: stable page IDs, acquired image paths, source URLs,
-   checksums, and provenance.
+   checksums, and provenance. Validate this manifest before handing it to
+   `newspaper-parsing`.
 
 14. Merge completed worker seed outputs into deduped page and issue manifests:
 

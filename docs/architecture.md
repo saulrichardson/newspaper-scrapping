@@ -65,6 +65,13 @@ newspaper-scrapper build-source-artifact-manifest \
   --output-jsonl output/<run>/source_artifacts.jsonl \
   --include-status downloaded \
   --require-files
+
+newspaper-scrapper validate-source-artifact-manifest \
+  --input-jsonl output/<run>/source_artifacts.jsonl \
+  --require-files \
+  --require-checksums \
+  --verify-checksums \
+  --output-json output/<run>/source_artifacts.validation.json
 ```
 
 Each JSONL row is intentionally compatible with the parsing repo's parse input
@@ -72,6 +79,11 @@ manifest: `page_id`, `image_path`, `issue_id`, `page_number`,
 `checksum_sha256`, `source`, and `metadata`. The acquisition repo owns source
 identity and checksums; the parser repo owns model outputs, fusion, transcripts,
 review packets, and performance reports.
+
+The validation report checks parser-required fields, unique page IDs, image
+file presence, SHA-256 format and optional byte verification, source identity,
+and the `source-artifact-v1` metadata contract. Torch smoke runs fail unless
+the generated manifest validates cleanly.
 
 Torch smoke for this contract:
 

@@ -82,6 +82,14 @@ cd "$PROJECT_ROOT"
   --require-files \
   > "$RUN_DIR/summary.json"
 
+"$SCRAPPER_PY" -m newspaper_scrapper.cli.main validate-source-artifact-manifest \
+  --input-jsonl "$OUTPUT_JSONL" \
+  --require-files \
+  --require-checksums \
+  --verify-checksums \
+  --output-json "$RUN_DIR/validation.json" \
+  > "$RUN_DIR/validation.stdout.json"
+
 "$SCRAPPER_PY" - <<PY
 from __future__ import annotations
 
@@ -90,15 +98,18 @@ from pathlib import Path
 
 run_dir = Path("$RUN_DIR")
 summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+validation = json.loads((run_dir / "validation.json").read_text(encoding="utf-8"))
 rows = [
     json.loads(line)
     for line in (run_dir / "source_artifacts.jsonl").read_text(encoding="utf-8").splitlines()
     if line.strip()
 ]
 status = {
-    "status": "ok" if summary.get("rows_written") == 1 and rows and rows[0].get("checksum_sha256") else "error",
+    "status": "ok" if summary.get("rows_written") == 1 and rows and rows[0].get("checksum_sha256") and validation.get("status") == "ok" else "error",
     "run_dir": str(run_dir),
     "summary": summary,
+    "validation": validation,
+    "validation_json": str(run_dir / "validation.json"),
     "source_artifacts_jsonl": str(run_dir / "source_artifacts.jsonl"),
     "page_id": rows[0].get("page_id") if rows else "",
 }

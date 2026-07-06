@@ -1021,6 +1021,61 @@ def build_source_artifact_manifest_cmd(
     click.echo(json.dumps(result, indent=2, sort_keys=True))
 
 
+@cli.command("validate-source-artifact-manifest")
+@click.option("--input-jsonl", type=click.Path(path_type=Path, exists=True), required=True)
+@click.option(
+    "--require-files/--allow-missing-files",
+    default=False,
+    show_default=True,
+    help="Fail when image_path does not point to an existing file.",
+)
+@click.option(
+    "--require-checksums/--allow-missing-checksums",
+    default=False,
+    show_default=True,
+    help="Fail when checksum_sha256 is empty.",
+)
+@click.option(
+    "--verify-checksums/--trust-checksums",
+    default=False,
+    show_default=True,
+    help="Recompute file SHA-256 values and compare them to checksum_sha256.",
+)
+@click.option(
+    "--warnings-as-errors/--allow-warnings",
+    default=False,
+    show_default=True,
+    help="Return a failing status when validation emits warnings.",
+)
+@click.option(
+    "--output-json",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Optional path to write the validation report JSON.",
+)
+def validate_source_artifact_manifest_cmd(
+    input_jsonl: Path,
+    require_files: bool,
+    require_checksums: bool,
+    verify_checksums: bool,
+    warnings_as_errors: bool,
+    output_json: Path | None,
+) -> None:
+    report = source_manifest_uc.validate_source_artifact_manifest(
+        input_jsonl=input_jsonl,
+        require_files=require_files,
+        require_checksums=require_checksums,
+        verify_checksums=verify_checksums,
+        warnings_are_errors=warnings_as_errors,
+    )
+    if output_json is not None:
+        output_json.parent.mkdir(parents=True, exist_ok=True)
+        output_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    click.echo(json.dumps(report, indent=2, sort_keys=True))
+    if report["status"] == "error":
+        raise click.ClickException("source artifact manifest validation failed")
+
+
 @cli.command("torch-check")
 @click.option("--host", default="torch", show_default=True)
 def torch_check_cmd(host: str) -> None:

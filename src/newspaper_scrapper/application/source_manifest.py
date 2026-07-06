@@ -90,6 +90,36 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _issue(
+    issues: list[dict[str, Any]],
+    *,
+    level: str,
+    code: str,
+    message: str,
+    line: int | None = None,
+    page_id: str = "",
+    path: Path | str | None = None,
+) -> None:
+    row: dict[str, Any] = {"level": level, "code": code, "message": message}
+    if line is not None:
+        row["line"] = line
+    if page_id:
+        row["page_id"] = page_id
+    if path is not None:
+        row["path"] = str(path)
+    issues.append(row)
+
+
+def _validation_status(issues: list[dict[str, Any]], *, warnings_are_errors: bool) -> str:
+    errors = sum(1 for issue in issues if issue.get("level") == "error")
+    warnings = sum(1 for issue in issues if issue.get("level") == "warning")
+    if errors or (warnings_are_errors and warnings):
+        return "error"
+    if warnings:
+        return "warning"
+    return "ok"
+
+
 def _row_source_metadata(row: dict[str, str]) -> dict[str, str]:
     skip = {
         "output_path",
@@ -207,3 +237,264 @@ def write_source_artifact_manifest(
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     summary["summary_json"] = str(summary_path)
     return summary
+
+
+def iter_jsonl_rows(path: Path, issues: list[dict[str, Any]]) -> Iterable[tuple[int, dict[str, Any]]]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        _issue(issues, level="error", code="missing_manifest", message="manifest JSONL is missing", path=path)
+        return
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            _issue(
+                issues,
+                level="error",
+                code="invalid_jsonl",
+                message=f"invalid JSONL row: {exc.msg}",
+                line=line_number,
+                path=path,
+            )
+            continue
+        if not isinstance(payload, dict):
+            _issue(
+                issues,
+                level="error",
+                code="invalid_row",
+                message="manifest row must be a JSON object",
+                line=line_number,
+                path=path,
+            )
+            continue
+        yield line_number, payload
+
+
+def validate_source_artifact_manifest(
+    *,
+    input_jsonl: Path,
+    require_files: bool = False,
+    require_checksums: bool = False,
+    verify_checksums: bool = False,
+    warnings_are_errors: bool = False,
+) -> dict[str, Any]:
+    """Validate the parser-ready source artifact JSONL contract."""
+
+    manifest = input_jsonl.expanduser().resolve()
+    issues: list[dict[str, Any]] = []
+    seen_page_ids: set[str] = set()
+    rows = 0
+    rows_with_files = 0
+    rows_with_checksums = 0
+    source_systems: set[str] = set()
+
+    for line_number, row in iter_jsonl_rows(manifest, issues):
+        rows += 1
+        page_id = str(row.get("page_id") or "").strip()
+        if not page_id:
+            _issue(
+                issues,
+                level="error",
+                code="missing_page_id",
+                message="row is missing page_id",
+                line=line_number,
+                path=manifest,
+            )
+        elif page_id in seen_page_ids:
+            _issue(
+                issues,
+                level="error",
+                code="duplicate_page_id",
+                message="page_id appears more than once",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+        else:
+            seen_page_ids.add(page_id)
+
+        image_path_raw = str(row.get("image_path") or "").strip()
+        if not image_path_raw:
+            _issue(
+                issues,
+                level="error",
+                code="missing_image_path",
+                message="row is missing image_path",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+            image_path = None
+        else:
+            image_path = Path(image_path_raw).expanduser()
+            if not image_path.is_absolute():
+                image_path = (manifest.parent / image_path).resolve()
+            if image_path.is_file():
+                rows_with_files += 1
+            else:
+                level = "error" if require_files else "warning"
+                _issue(
+                    issues,
+                    level=level,
+                    code="missing_image_file",
+                    message="image_path does not point to an existing file",
+                    line=line_number,
+                    page_id=page_id,
+                    path=image_path,
+                )
+
+        page_number = row.get("page_number")
+        if page_number not in (None, ""):
+            try:
+                int(page_number)
+            except (TypeError, ValueError):
+                _issue(
+                    issues,
+                    level="error",
+                    code="invalid_page_number",
+                    message="page_number must be an integer or null",
+                    line=line_number,
+                    page_id=page_id,
+                    path=manifest,
+                )
+
+        checksum = str(row.get("checksum_sha256") or "").strip()
+        if checksum:
+            rows_with_checksums += 1
+            if not re.fullmatch(r"[0-9a-fA-F]{64}", checksum):
+                _issue(
+                    issues,
+                    level="error",
+                    code="invalid_checksum",
+                    message="checksum_sha256 must be a 64-character hex digest",
+                    line=line_number,
+                    page_id=page_id,
+                    path=manifest,
+                )
+            elif verify_checksums and image_path is not None and image_path.is_file():
+                actual = _sha256_file(image_path)
+                if actual.lower() != checksum.lower():
+                    _issue(
+                        issues,
+                        level="error",
+                        code="checksum_mismatch",
+                        message="checksum_sha256 does not match image file bytes",
+                        line=line_number,
+                        page_id=page_id,
+                        path=image_path,
+                    )
+        elif require_checksums or (require_files and image_path is not None and image_path.is_file()):
+            _issue(
+                issues,
+                level="error",
+                code="missing_checksum",
+                message="row is missing checksum_sha256",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+
+        source = row.get("source")
+        if not isinstance(source, dict):
+            _issue(
+                issues,
+                level="error",
+                code="invalid_source",
+                message="source must be a JSON object",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+            source = {}
+        source_system = str(source.get("source_system") or "").strip()
+        source_id = str(source.get("source_id") or "").strip()
+        if source_system:
+            source_systems.add(source_system)
+        else:
+            _issue(
+                issues,
+                level="error",
+                code="missing_source_system",
+                message="source.source_system is required",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+        if not source_id:
+            _issue(
+                issues,
+                level="warning",
+                code="missing_source_id",
+                message="source.source_id is empty",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+
+        metadata = row.get("metadata")
+        if not isinstance(metadata, dict):
+            _issue(
+                issues,
+                level="error",
+                code="invalid_metadata",
+                message="metadata must be a JSON object",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+            metadata = {}
+        if metadata.get("contract_version") != "source-artifact-v1":
+            _issue(
+                issues,
+                level="error",
+                code="invalid_contract_version",
+                message="metadata.contract_version must be source-artifact-v1",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+        if metadata.get("artifact_kind") != "page_image":
+            _issue(
+                issues,
+                level="error",
+                code="invalid_artifact_kind",
+                message="metadata.artifact_kind must be page_image",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+
+    if rows == 0:
+        _issue(
+            issues,
+            level="error",
+            code="empty_manifest",
+            message="manifest contains no data rows",
+            path=manifest,
+        )
+
+    errors = sum(1 for issue in issues if issue.get("level") == "error")
+    warnings = sum(1 for issue in issues if issue.get("level") == "warning")
+    return {
+        "contract_version": "source-artifact-validation-v1",
+        "status": _validation_status(issues, warnings_are_errors=warnings_are_errors),
+        "input_jsonl": str(manifest),
+        "counts": {
+            "rows": rows,
+            "unique_page_ids": len(seen_page_ids),
+            "rows_with_files": rows_with_files,
+            "rows_with_checksums": rows_with_checksums,
+            "source_systems": len(source_systems),
+            "errors": errors,
+            "warnings": warnings,
+        },
+        "source_systems": sorted(source_systems),
+        "require_files": require_files,
+        "require_checksums": require_checksums,
+        "verify_checksums": verify_checksums,
+        "issues": issues,
+    }
