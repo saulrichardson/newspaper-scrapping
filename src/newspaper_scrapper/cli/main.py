@@ -7,7 +7,9 @@ from pathlib import Path
 
 import click
 
+from newspaper_scrapper import __version__
 from newspaper_scrapper.application import auth as auth_uc
+from newspaper_scrapper.application import artifact_inventory as artifact_inventory_uc
 from newspaper_scrapper.application import catalog as catalog_uc
 from newspaper_scrapper.application import discovery as discovery_uc
 from newspaper_scrapper.application import download as download_uc
@@ -26,6 +28,7 @@ from newspaper_scrapper.logging_config import configure as configure_logging
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.version_option(version=__version__, prog_name="newspaper-scrapper")
 @click.option(
     "--log-level",
     type=click.Choice(
@@ -1074,6 +1077,89 @@ def validate_source_artifact_manifest_cmd(
     click.echo(json.dumps(report, indent=2, sort_keys=True))
     if report["status"] == "error":
         raise click.ClickException("source artifact manifest validation failed")
+
+
+@cli.command("snapshot-s3-artifact-inventory")
+@click.option("--bucket", required=True, help="S3 bucket containing acquired artifacts.")
+@click.option("--prefix", default="", show_default=True, help="Optional S3 key prefix.")
+@click.option("--output-jsonl", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--source-id-regex",
+    default=artifact_inventory_uc.DEFAULT_SOURCE_ID_PATTERN,
+    show_default=True,
+    help="Regex applied to each object basename; use a source_id named or first capture group.",
+)
+@click.option("--aws-cli", default="aws", show_default=True, help="AWS CLI executable.")
+def snapshot_s3_artifact_inventory_cmd(
+    bucket: str,
+    prefix: str,
+    output_jsonl: Path,
+    source_id_regex: str,
+    aws_cli: str,
+) -> None:
+    try:
+        result = artifact_inventory_uc.write_s3_inventory_snapshot(
+            bucket=bucket,
+            prefix=prefix,
+            output_jsonl=output_jsonl,
+            source_id_pattern=source_id_regex,
+            aws_cli=aws_cli,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(result, indent=2, sort_keys=True))
+
+
+@cli.command("reconcile-source-artifacts")
+@click.option("--input-jsonl", type=click.Path(path_type=Path, exists=True), required=True)
+@click.option("--output-dir", type=click.Path(path_type=Path), required=True)
+@click.option(
+    "--remote-inventory-jsonl",
+    type=click.Path(path_type=Path, exists=True),
+    multiple=True,
+    help="Normalized remote inventory snapshot. Repeatable.",
+)
+@click.option(
+    "--verify-local-checksums/--trust-local-checksums",
+    default=True,
+    show_default=True,
+)
+@click.option(
+    "--verify-image-decode/--skip-image-decode",
+    default=True,
+    show_default=True,
+)
+def reconcile_source_artifacts_cmd(
+    input_jsonl: Path,
+    output_dir: Path,
+    remote_inventory_jsonl: tuple[Path, ...],
+    verify_local_checksums: bool,
+    verify_image_decode: bool,
+) -> None:
+    try:
+        result = artifact_inventory_uc.reconcile_source_artifacts(
+            input_jsonl=input_jsonl,
+            output_dir=output_dir,
+            remote_inventory_jsonl=remote_inventory_jsonl,
+            verify_local_checksums=verify_local_checksums,
+            verify_image_decode=verify_image_decode,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(json.dumps(result, indent=2, sort_keys=True))
+
+
+@cli.command("validate-artifact-reconciliation")
+@click.option("--run-dir", type=click.Path(path_type=Path, exists=True), required=True)
+@click.option("--output-json", type=click.Path(path_type=Path), default=None)
+def validate_artifact_reconciliation_cmd(run_dir: Path, output_json: Path | None) -> None:
+    report = artifact_inventory_uc.validate_reconciliation_bundle(run_dir)
+    if output_json is not None:
+        output_json.parent.mkdir(parents=True, exist_ok=True)
+        output_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    click.echo(json.dumps(report, indent=2, sort_keys=True))
+    if report["status"] == "error":
+        raise click.ClickException("artifact reconciliation validation failed")
 
 
 @cli.command("torch-check")

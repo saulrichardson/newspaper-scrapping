@@ -1,6 +1,10 @@
 # Newspapers.com Scraper
 
-Headful, real-Google-Chrome scraping pipeline for Newspapers.com.
+[![CI](https://github.com/saulrichardson/newspaper-scrapping/actions/workflows/ci.yml/badge.svg)](https://github.com/saulrichardson/newspaper-scrapping/actions/workflows/ci.yml)
+
+Headful, real-Google-Chrome acquisition pipeline for Newspapers.com, with
+resumable workers, parser-ready source manifests, local/S3 artifact inventory,
+and deterministic recovery planning.
 
 This repo is built around the operational constraints we already learned the
 hard way:
@@ -45,6 +49,9 @@ Start here if someone new needs to take over operations:
   - day-2 operations, access, health checks, recovery, watchers, and safe updates
 - [`docs/aws_storage_model.md`](docs/aws_storage_model.md)
   - canonical PNG archive, inventory, and worker retirement model
+- [`docs/artifact_reconciliation.md`](docs/artifact_reconciliation.md)
+  - local/S3 reconciliation contracts, classifications, recovery manifests,
+    and parser-ready subsets
 - [`scripts/aws/README.md`](scripts/aws/README.md)
   - script catalog and common operational recipes
 
@@ -244,7 +251,29 @@ without exposing the private operational history of this repo.
    checksums, and provenance. Validate this manifest before handing it to
    `newspaper-parsing`.
 
-14. Merge completed worker seed outputs into deduped page and issue manifests:
+14. Reconcile local artifacts against a normalized S3 inventory and emit a
+    resumable recovery bundle:
+
+   ```bash
+   poetry run newspaper-scrapper snapshot-s3-artifact-inventory \
+     --bucket "$FLEET_BUCKET" \
+     --prefix archive/viewer_png/by_image_id/ \
+     --output-jsonl /tmp/viewer_png.inventory.jsonl
+
+   poetry run newspaper-scrapper reconcile-source-artifacts \
+     --input-jsonl output/search_zoning_downloads/source_artifacts.jsonl \
+     --remote-inventory-jsonl /tmp/viewer_png.inventory.jsonl \
+     --output-dir output/search_zoning_downloads/reconciliation
+
+   poetry run newspaper-scrapper validate-artifact-reconciliation \
+     --run-dir output/search_zoning_downloads/reconciliation
+   ```
+
+   The bundle separates verified parser inputs, unambiguous S3 downloads,
+   source reacquisitions, and conflicts requiring review. See
+   [`docs/artifact_reconciliation.md`](docs/artifact_reconciliation.md).
+
+15. Merge completed worker seed outputs into deduped page and issue manifests:
 
    ```bash
    poetry run newspaper-scrapper merge-search-workers \
@@ -257,7 +286,7 @@ without exposing the private operational history of this repo.
    - `page_manifest_merged.csv`
    - `issue_manifest_merged.csv`
 
-15. Split a large manifest into conservative worker shards:
+16. Split a large manifest into conservative worker shards:
 
    ```bash
    poetry run newspaper-scrapper shard-manifest \
@@ -270,7 +299,7 @@ without exposing the private operational history of this repo.
    This keeps each issue together by default, which is safer for low-rate
    multi-session downloading.
 
-16. Capture a browser-rendered full-page PNG as a first-class artifact when
+17. Capture a browser-rendered full-page PNG as a first-class artifact when
    the live `/image/<id>/` page is viewable and you want a browser-native
    page image:
 
@@ -280,7 +309,7 @@ without exposing the private operational history of this repo.
      --output-dir output/viewer_screenshot_probe
    ```
 
-16. Run browser-rendered screenshot capture over a manifest the same way you
+18. Run browser-rendered screenshot capture over a manifest the same way you
    would run `download-pages`. For large batches, prefer the isolated
    synthetic tile-canvas strategy:
 
@@ -293,7 +322,7 @@ without exposing the private operational history of this repo.
      --continue-on-error
    ```
 
-15. For a production-style single-worker screenshot run, use the multi-pass
+19. For a production-style single-worker screenshot run, use the multi-pass
    orchestrator. It writes pass-specific outputs, a merged final results CSV,
    and a remaining-failures manifest:
 
@@ -306,7 +335,7 @@ without exposing the private operational history of this repo.
      --stop-on-stall
    ```
 
-16. Check the current torch environment before attempting an HPC run:
+20. Check the current torch environment before attempting an HPC run:
 
    ```bash
    poetry run newspaper-scrapper torch-check
@@ -336,6 +365,11 @@ without exposing the private operational history of this repo.
 - `download-pages`
 - `download-issue`
 - `shard-manifest`
+- `build-source-artifact-manifest`
+- `validate-source-artifact-manifest`
+- `snapshot-s3-artifact-inventory`
+- `reconcile-source-artifacts`
+- `validate-artifact-reconciliation`
 - `torch-check`
 
 ## Notes

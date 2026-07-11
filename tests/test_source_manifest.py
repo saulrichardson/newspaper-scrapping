@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from newspaper_scrapper.application.source_manifest import (
@@ -286,3 +287,87 @@ def test_build_page_id_is_stable_for_non_numeric_page() -> None:
         )
         == "Cambridge-Sentinel-1942__A-1__image-12"
     )
+
+
+def test_source_manifest_resolves_relative_image_path_from_csv_directory(tmp_path: Path) -> None:
+    image_path = tmp_path / "images" / "relative.jpg"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"relative-image")
+    input_csv = tmp_path / "results.csv"
+    _write_csv(
+        input_csv,
+        [
+            {
+                "issue_id": "issue-relative",
+                "page_num": "1",
+                "preferred_image_id": "relative-1",
+                "status": "downloaded",
+                "output_path": "images/relative.jpg",
+            }
+        ],
+    )
+    output_jsonl = tmp_path / "source_artifacts.jsonl"
+
+    write_source_artifact_manifest(input_csv=input_csv, output_jsonl=output_jsonl, require_files=True)
+
+    row = json.loads(output_jsonl.read_text(encoding="utf-8"))
+    assert row["image_path"] == str(image_path.resolve())
+
+
+def test_source_manifest_rejects_duplicate_generated_page_ids(tmp_path: Path) -> None:
+    image_path = tmp_path / "image.jpg"
+    image_path.write_bytes(b"duplicate")
+    input_csv = tmp_path / "results.csv"
+    row = {
+        "issue_id": "issue-duplicate",
+        "page_num": "1",
+        "preferred_image_id": "duplicate-1",
+        "status": "downloaded",
+        "output_path": str(image_path),
+    }
+    _write_csv(input_csv, [row, row])
+
+    with pytest.raises(ValueError, match="duplicate page_id"):
+        write_source_artifact_manifest(
+            input_csv=input_csv,
+            output_jsonl=tmp_path / "source_artifacts.jsonl",
+        )
+
+
+def test_validate_source_manifest_rejects_unsafe_page_id(tmp_path: Path) -> None:
+    manifest = tmp_path / "source_artifacts.jsonl"
+    manifest.write_text(
+        json.dumps(
+            {
+                "page_id": "../outside",
+                "image_path": str(tmp_path / "missing.jpg"),
+                "checksum_sha256": "",
+                "source": {"source_system": "fixture", "source_id": "unsafe"},
+                "metadata": {"contract_version": "source-artifact-v1", "artifact_kind": "page_image"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = validate_source_artifact_manifest(input_jsonl=manifest)
+
+    assert report["status"] == "error"
+    assert any(issue["code"] == "invalid_page_id" for issue in report["issues"])
+
+
+def test_validate_source_manifest_rejects_source_id_assigned_to_two_pages(tmp_path: Path) -> None:
+    manifest = tmp_path / "source_artifacts.jsonl"
+    base = {
+        "image_path": str(tmp_path / "missing.jpg"),
+        "checksum_sha256": "",
+        "source": {"source_system": "fixture", "source_id": "same-image"},
+        "metadata": {"contract_version": "source-artifact-v1", "artifact_kind": "page_image"},
+    }
+    rows = [base | {"page_id": "page-one"}, base | {"page_id": "page-two"}]
+    manifest.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    report = validate_source_artifact_manifest(input_jsonl=manifest)
+
+    assert report["status"] == "error"
+    assert any(issue["code"] == "duplicate_source_id" for issue in report["issues"])

@@ -6,7 +6,7 @@ set -euo pipefail
 
 REMOTE="${REMOTE:-torch}"
 ACCOUNT="${ACCOUNT:-torch_pr_609_general}"
-PARTITION="${PARTITION:-cs}"
+PARTITION="${PARTITION:-cpu_short}"
 REMOTE_BASE="${REMOTE_BASE:-}"
 WAIT=1
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-900}"
@@ -22,7 +22,7 @@ Flags:
   --remote HOST          SSH host, default: torch
   --remote-base PATH     Scratch root, default: /scratch/$REMOTE_USER/codex_hpc/newspaper_scrapping_ops
   --account ACCOUNT      Slurm account, default: torch_pr_609_general
-  --partition PARTITION  Slurm partition, default: cs
+  --partition PARTITION  Slurm partition, default: cpu_short
   --timeout SECONDS      Poll timeout, default: 900
   --poll SECONDS         Poll interval, default: 10
   --no-wait              Submit and print job/run paths without polling
@@ -93,7 +93,7 @@ fi
 
 PROJECT_ROOT="$REMOTE_BASE/newspaper-scrapping-ops"
 RUN_DIR="$REMOTE_BASE/runs/source_manifest_$(date -u +%Y%m%d_%H%M%S)"
-SCRIPT="scripts/torch/source_manifest_smoke_cs.sbatch"
+SCRIPT="scripts/torch/source_artifact_canary_cpu_short.sbatch"
 
 echo "[plan] remote=$REMOTE"
 echo "[plan] remote_user=$REMOTE_USER"
@@ -117,9 +117,13 @@ if [[ "$SKIP_SYNC" -eq 0 ]]; then
     --exclude '.env' \
     --exclude '.env.*' \
     --exclude '.venv/' \
+    --exclude 'build/' \
+    --exclude 'dist/' \
+    --exclude '*.egg-info/' \
     --exclude 'data/' \
     --exclude 'output/' \
     --exclude 'docs/private/' \
+    --exclude '.DS_Store' \
     ./ "$REMOTE:$PROJECT_ROOT/"
 fi
 
@@ -133,7 +137,7 @@ JOB_ID="$(
 
 echo "[submit] job_id=$JOB_ID"
 echo "[submit] run_dir=$RUN_DIR"
-echo "[submit] logs=$REMOTE_BASE/logs/scrapping_source_manifest-$JOB_ID.out"
+echo "[submit] logs=$REMOTE_BASE/logs/scrapping_artifact_canary-$JOB_ID.out"
 
 if [[ "$WAIT" -eq 0 ]]; then
   exit 0
@@ -154,4 +158,15 @@ if [[ "$SECONDS" -ge "$deadline" ]]; then
   exit 3
 fi
 
+SLURM_RESULT="$(ssh "$REMOTE" "sacct -n -X -j '$JOB_ID' --format=State,ExitCode -P 2>/dev/null | head -1 || true")"
+echo "[result] slurm=${SLURM_RESULT:-unknown}"
+
+set +e
 ssh "$REMOTE" "cat '$RUN_DIR/slurm_status.json'"
+RESULT_CODE=$?
+set -e
+if [[ "$RESULT_CODE" -ne 0 ]]; then
+  ssh "$REMOTE" "tail -80 '$REMOTE_BASE/logs/scrapping_artifact_canary-$JOB_ID.out' 2>/dev/null || true" >&2
+  ssh "$REMOTE" "tail -80 '$REMOTE_BASE/logs/scrapping_artifact_canary-$JOB_ID.err' 2>/dev/null || true" >&2
+  exit "$RESULT_CODE"
+fi

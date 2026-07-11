@@ -11,6 +11,11 @@ from typing import Any, Iterable
 
 
 PAGE_ID_SAFE_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
+PAGE_ID_VALID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
+
+
+def is_safe_page_id(value: str) -> bool:
+    return bool(PAGE_ID_VALID_RE.fullmatch(value)) and ".." not in value
 
 
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -141,10 +146,12 @@ def build_source_artifact_rows(
     require_files: bool = False,
     include_statuses: set[str] | None = None,
 ) -> list[dict[str, Any]]:
+    input_csv = input_csv.expanduser().resolve()
     rows = _read_csv_rows(input_csv)
     image_root = image_root.expanduser().resolve() if image_root is not None else None
     include_statuses = include_statuses or set()
     artifacts: list[dict[str, Any]] = []
+    seen_page_ids: set[str] = set()
 
     for csv_index, row in enumerate(rows, start=1):
         status = str(row.get("status") or "").strip()
@@ -155,6 +162,8 @@ def build_source_artifact_rows(
             image_root=image_root,
             image_path_field=image_path_field,
         ).expanduser()
+        if not image_path.is_absolute():
+            image_path = input_csv.parent / image_path
         exists = image_path.is_file()
         if require_files and not exists:
             raise FileNotFoundError(f"missing image file for row {csv_index}: {image_path}")
@@ -175,9 +184,13 @@ def build_source_artifact_rows(
                 "image_exists": exists,
             }
         )
+        page_id = build_page_id(row)
+        if page_id in seen_page_ids:
+            raise ValueError(f"duplicate page_id generated from input row {csv_index}: {page_id}")
+        seen_page_ids.add(page_id)
         artifacts.append(
             {
-                "page_id": build_page_id(row),
+                "page_id": page_id,
                 "image_path": str(image_path.resolve() if exists else image_path),
                 "issue_id": row.get("issue_id", ""),
                 "page_number": _page_number(row),
@@ -287,6 +300,7 @@ def validate_source_artifact_manifest(
     manifest = input_jsonl.expanduser().resolve()
     issues: list[dict[str, Any]] = []
     seen_page_ids: set[str] = set()
+    seen_source_ids: dict[str, str] = {}
     rows = 0
     rows_with_files = 0
     rows_with_checksums = 0
@@ -302,6 +316,16 @@ def validate_source_artifact_manifest(
                 code="missing_page_id",
                 message="row is missing page_id",
                 line=line_number,
+                path=manifest,
+            )
+        elif not is_safe_page_id(page_id):
+            _issue(
+                issues,
+                level="error",
+                code="invalid_page_id",
+                message="page_id must be a portable artifact identifier",
+                line=line_number,
+                page_id=page_id,
                 path=manifest,
             )
         elif page_id in seen_page_ids:
@@ -434,6 +458,18 @@ def validate_source_artifact_manifest(
                 page_id=page_id,
                 path=manifest,
             )
+        elif source_id in seen_source_ids and seen_source_ids[source_id] != page_id:
+            _issue(
+                issues,
+                level="error",
+                code="duplicate_source_id",
+                message=f"source.source_id is already assigned to page {seen_source_ids[source_id]}",
+                line=line_number,
+                page_id=page_id,
+                path=manifest,
+            )
+        else:
+            seen_source_ids[source_id] = page_id
 
         metadata = row.get("metadata")
         if not isinstance(metadata, dict):
@@ -486,6 +522,7 @@ def validate_source_artifact_manifest(
         "counts": {
             "rows": rows,
             "unique_page_ids": len(seen_page_ids),
+            "unique_source_ids": len(seen_source_ids),
             "rows_with_files": rows_with_files,
             "rows_with_checksums": rows_with_checksums,
             "source_systems": len(source_systems),

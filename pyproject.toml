@@ -1,11 +1,17 @@
 [project]
 name = "newspaper-scrapper"
-version = "0.1.0"
-description = "Robust headful Google Chrome scraper pipeline for Newspapers.com"
+version = "0.2.0"
+description = "Resumable Newspapers.com acquisition, artifact inventory, and parser-manifest infrastructure"
 readme = "README.md"
 requires-python = ">=3.11,<4.0"
-authors = [{ name = "saulrichardson" }]
-keywords = ["scraping", "newspapers.com", "chrome", "cdp"]
+authors = [{ name = "Saul Richardson" }]
+keywords = ["scraping", "newspapers.com", "chrome", "cdp", "aws", "data-pipeline"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+]
 dependencies = [
   "click>=8.1,<9.0",
   "pillow>=10.0,<12.0",
@@ -16,6 +22,10 @@ dependencies = [
 
 [project.scripts]
 newspaper-scrapper = "newspaper_scrapper.cli.main:main"
+
+[project.urls]
+Repository = "https://github.com/saulrichardson/newspaper-scrapping"
+Issues = "https://github.com/saulrichardson/newspaper-scrapping/issues"
 
 [[tool.poetry.packages]]
 include = "newspaper_scrapper"
@@ -29,6 +39,9 @@ black = "*"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["data", "output", "scratch", ".venv"]
+
+[tool.ruff]
+target-version = "py311"
 
 [build-system]
 requires = ["poetry-core>=1.6.0"]

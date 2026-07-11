@@ -559,7 +559,6 @@ def run_screenshot_workers(
 
     def launch_worker(row: dict[str, str], attempts: int) -> WorkerRuntime:
         nonlocal launch_sequence
-        worker_name = row["worker_name"]
         worker_root = Path(row["manifest_csv"]).resolve().parent
         stdout_path = worker_root / "stdout.log"
         stderr_path = worker_root / "stderr.log"

@@ -4,6 +4,7 @@ import argparse
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -83,10 +84,41 @@ def export_head(repo_dir: Path, output_dir: Path) -> None:
             archive.extractall(output_dir)
 
 
-def init_git_repo(output_dir: Path, commit_message: str) -> None:
-    run(["git", "init", "-b", "main"], cwd=output_dir)
-    run(["git", "add", "."], cwd=output_dir)
-    run(["git", "commit", "-m", commit_message], cwd=output_dir)
+def git_status(repo_dir: Path) -> str:
+    result = run(["git", "status", "--porcelain"], cwd=repo_dir, capture_output=True)
+    return result.stdout.strip()
+
+
+def clear_worktree_preserving_git(repo_dir: Path) -> None:
+    for child in repo_dir.iterdir():
+        if child.name == ".git":
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
+def stage_export(repo_dir: Path, *, initialize: bool) -> None:
+    if initialize:
+        run(["git", "init", "-b", "main"], cwd=repo_dir)
+    run(["git", "add", "-A", "--force"], cwd=repo_dir)
+
+
+def commit_staged(repo_dir: Path, commit_message: str) -> bool:
+    changed = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=repo_dir,
+        check=False,
+    ).returncode != 0
+    if changed:
+        run(["git", "commit", "-m", commit_message], cwd=repo_dir)
+    return changed
+
+
+def stage_and_commit(repo_dir: Path, commit_message: str, *, initialize: bool) -> bool:
+    stage_export(repo_dir, initialize=initialize)
+    return commit_staged(repo_dir, commit_message)
 
 
 def load_patterns(patterns_file: Path | None) -> list[str]:
@@ -160,7 +192,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-git-init",
         action="store_true",
-        help="Do not initialize a git repo and initial commit in the output directory.",
+        help="Do not initialize, stage, or commit the exported output.",
     )
     parser.add_argument(
         "--commit-message",
@@ -194,9 +226,29 @@ def main() -> int:
             raise SystemExit(
                 f"Output directory already exists: {output_dir}. Re-run with --force to replace it."
             )
-        shutil.rmtree(output_dir)
+        if (output_dir / ".git").is_dir():
+            dirty = git_status(output_dir)
+            if dirty:
+                raise SystemExit(
+                    f"Public target has uncommitted changes and will not be replaced: {output_dir}\n{dirty}"
+                )
+            source_name = remote_repo_name(repo_dir) or repo_dir.name
+            expected_name = source_name[:-4] if source_name.endswith("-ops") else source_name
+            target_name = remote_repo_name(output_dir)
+            if target_name and target_name != expected_name:
+                raise SystemExit(
+                    f"Refusing to replace unexpected public remote {target_name!r}; expected {expected_name!r}"
+                )
+            clear_worktree_preserving_git(output_dir)
+            existing_git = True
+        else:
+            shutil.rmtree(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            existing_git = False
+    else:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        existing_git = False
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     export_head(repo_dir, output_dir)
 
     matches = scan_forbidden_patterns(output_dir, load_patterns(patterns_file))
@@ -206,13 +258,25 @@ def main() -> int:
         )
 
     if not args.no_git_init:
-        init_git_repo(output_dir, args.commit_message)
+        stage_export(output_dir, initialize=not existing_git)
+
+    safety_script = output_dir / "scripts" / "check_public_safety.py"
+    if not safety_script.is_file():
+        raise SystemExit(f"Export is missing the required public-safety scanner: {safety_script}")
+    run([sys.executable, str(safety_script)], cwd=output_dir)
+
+    if not args.no_git_init:
+        changed = commit_staged(output_dir, args.commit_message)
+    else:
+        changed = False
 
     print(f"Exported public repo to {output_dir}")
     if patterns_file is not None and patterns_file.exists():
         print(f"Verified against forbidden-pattern file: {patterns_file}")
     else:
         print("No forbidden-pattern file was used.")
+    if not args.no_git_init:
+        print("Committed exported changes." if changed else "Public export already matched the current HEAD.")
     return 0
 
 

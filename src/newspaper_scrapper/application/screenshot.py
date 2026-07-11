@@ -22,6 +22,7 @@ from newspaper_scrapper.application.download import (
     read_manifest,
 )
 from newspaper_scrapper.config import Settings
+from newspaper_scrapper.domain.models import ManifestRow
 
 
 Image.MAX_IMAGE_PIXELS = None

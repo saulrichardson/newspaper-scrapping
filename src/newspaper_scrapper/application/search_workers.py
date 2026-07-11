@@ -675,7 +675,6 @@ def run_search_workers(
 
     def launch_worker(row: dict[str, str], attempts: int) -> WorkerRuntime:
         nonlocal launch_sequence
-        worker_name = row["worker_name"]
         worker_dir = Path(row["output_dir"]).resolve()
         worker_dir.mkdir(parents=True, exist_ok=True)
         stdout_path = worker_dir / "stdout.log"
